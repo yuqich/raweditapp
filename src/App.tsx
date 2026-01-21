@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
 interface ImageResult {
@@ -231,11 +231,13 @@ function Histogram({ data }: { data: HistogramData | null }) {
       ctx.moveTo(0, h);
       for (let i = 0; i < 256; i++) {
         const val = arr[i] / max;
+        // const x = (i / 255) * w;
+        // Fix: Align histogram to full width properly
         const x = (i / 255) * w;
         const y = h - (val * h);
         ctx.lineTo(x, y);
       }
-      ctx.lineTo(w, h);
+      ctx.lineTo(w, h); // Close path
       ctx.fill();
     };
 
@@ -433,6 +435,7 @@ function WebGLViewer({ image, params }: { image: ImageResult | null, params: Web
 
 function App() {
   const [imageResult, setImageResult] = useState<ImageResult | null>(null);
+  const [imagePath, setImagePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [histData, setHistData] = useState<HistogramData | null>(null);
@@ -463,21 +466,32 @@ function App() {
       if (file) {
         setLoading(true);
         setError(null);
+        setImagePath(file as string); // Save path for re-use
+
         try {
           const data = await invoke<ImageResult>("load_raw", { path: file as string });
           setImageResult(data);
 
-          setParams({
-            exposure: 0.0,
-            contrast: 0.0,
-            temperature: 5500.0,
-            tint: 0.0,
-            highlights: 0.0,
-            shadows: 0.0,
-            whites: 0.0,
-            blacks: 0.0,
-            saturation: 0.0,
-          });
+          // Try loading existing params
+          try {
+            const basePath = (file as string).replace(/\.[^/.]+$/, "");
+            const loadedParams = await invoke<WebGLParams>("load_params", { path: `${basePath}.json` });
+            setParams(loadedParams);
+            console.log("Loaded existing params");
+          } catch (e) {
+            console.log("No existing params found, using default");
+            setParams({
+              exposure: 0.0,
+              contrast: 0.0,
+              temperature: 5500.0,
+              tint: 0.0,
+              highlights: 0.0,
+              shadows: 0.0,
+              whites: 0.0,
+              blacks: 0.0,
+              saturation: 0.0,
+            });
+          }
 
         } catch (e: any) {
           console.error(e);
@@ -488,6 +502,41 @@ function App() {
       }
     } catch (err: any) {
       setError(err.toString());
+    }
+  };
+
+  const handleSaveParams = async () => {
+    if (!imagePath) return;
+    try {
+      const basePath = imagePath.replace(/\.[^/.]+$/, "");
+      await invoke("save_params", { path: `${basePath}.json`, params });
+      alert("Saved edits successfully!");
+    } catch (e) {
+      alert("Failed to save: " + e);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!imagePath) return;
+    try {
+      const basePath = imagePath.replace(/\.[^/.]+$/, "");
+      const savePath = await save({
+        defaultPath: `${basePath}.jpg`,
+        filters: [{ name: 'JPEG', extensions: ['jpg'] }]
+      });
+
+      if (!savePath) return;
+
+      setLoading(true);
+      // Wait for a bit just to show loading state
+      await new Promise(r => setTimeout(r, 100));
+
+      await invoke("export_image", { path: imagePath, params, savePath });
+      alert("Export Successful!");
+    } catch (e) {
+      alert("Export Failed: " + e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -512,9 +561,17 @@ function App() {
     <div className="app-container">
       <header className="header">
         <div className="header-title">RAW Editor (WebGL - GPU)</div>
-        <button onClick={handleOpenFile} disabled={loading} className="primary">
-          {loading ? "Loading..." : "Open File"}
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={handleSaveParams} disabled={!imagePath} className="secondary">
+            Save Edits
+          </button>
+          <button onClick={handleExport} disabled={!imagePath} className="secondary">
+            Export JPEG
+          </button>
+          <button onClick={handleOpenFile} disabled={loading} className="primary">
+            {loading ? "Processing..." : "Open File"}
+          </button>
+        </div>
       </header>
 
       <div className="main-content">

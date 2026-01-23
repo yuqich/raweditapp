@@ -1,0 +1,12 @@
+prefix=/opt/homebrew/Cellar/libraw/0.22.0
+exec_prefix=${prefix}
+libdir=/opt/homebrew/Cellar/libraw/0.22.0/lib
+includedir=${prefix}/include
+
+Name: libraw
+Description: Raw image decoder library (non-thread-safe)
+Requires: lcms2
+Version: 0.22.0
+Libs: -L${libdir} -lraw -lc++ -Xpreprocessor -fopenmp
+Libs.private: -ljpeg 
+Cflags: -I${includedir}/libraw -I${includedir}
